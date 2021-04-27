@@ -1,135 +1,344 @@
 #!/bin/bash
 
+#AUTOR: Adam Cologna
+#LOGIN: xcolog00
+
 export POSIXLY_CORRECT=yes
 export LC_NUMERIC=en_US.UTF-8
+export LC_ALL=C
 
-#prints help
-help()
-{
-echo ""
-echo "USAGE"
-echo "tradelog [-h|--help] [FILTR] [PŘÍKAZ] [LOG [LOG2 [...]]"
-echo ""
-echo "COMMANDS"
-echo "list-tick – prints list of tickers"
-echo "profit – prints profit from all holded positions"
-echo "pos – prints value of currently holded positions"
-echo "last-price – last known price for every ticker"
-echo "hist-ord – prints histogram of number of transactions for every ticker"
-echo "graph-pos – prints graph of values of currently holded positions"
-echo ""
-echo "FILTERS"
-echo "-a DATETIME – after: logs after this date only"
-echo "-b DATETIME – before: logs before this date only"
-echo "-t TICKER – logs only with this ticker"
-echo "-w WIDTH – width of printed graph (optional)"
-echo "-h | --help – prints this"
-echo ""
+print_help()
+{	
+	echo "USAGE:"
+	echo "tradelog [-h|--help]"
+	echo "tradelog [filter...] [command] [LOG...]"
+	echo ""
+	echo "COMMANDS:"
+	echo "list-tick – prints out the list of tickers"
+	echo "profit – prints out the profit from closed positions"
+	echo "pos – prints out the values from closed positions ordered from the biggest downwards"
+	echo "last-price – prints out the last price of a given ticker"
+	echo "hist-ord – prints out the histogram based on the amounts of transactions of the ticker"
+	echo "graph-pos – prints out a graph of values help on a given position by a ticker"
+	echo ""
+	echo "FILTERS:"
+	echo "-a DATETIME – after: shows data only after the given date, the format of the date is YYYY-MM-DD HH:MM:SS."
+	echo "-b DATETIME – before: shows data only before the given date"
+	echo "-t TICKER – returns the data with coresponding to the ticker (or multiple tickers) given"
+	echo "-w WIDTH – sets the width of the longest line when printing out a graph, giving more than one -w filter results in a wrong way to run the program."
 }
 
-#variables inicialization
-command=""
-ticker_filter=""
-log_files=""
-gz_files=""
-daytime_after="0000-00-00 00:00:00"
-daytime_before="9999-99-99 99:99:99"
-width=0
 
-if [ "$#" = "0" ]
-then
-   cat -
-   exit 0
-fi
+var_list_tick(){
+	echo "$(echo "$1" | awk -F";" '{print $2 | "sort -u"}')"
+}
 
-#reads command line arguments
-while [ "$#" -gt 0 ]
-do
-   if [ $1 = "-t" ]
-   then
-      ticker_filter="$ticker_filter$2\|"
-      shift
-   elif [ $1 = "-a" ]
-   then
-      daytime_after="$2"
-      shift
-   elif [ $1 = "-b" ]
-   then
-      daytime_before="$2"
-      shift
-   elif [ $1 = "list-tick" ] || [ $1 = "profit" ] || [ $1 = "pos" ] || [ $1 = "last-price" ] || [ $1 = "hist-ord" ] || [ $1 = "graph-pos" ]
-   then
-      command="$1"
-   elif [ $1 = "-h" ] || [ $1 = "--help" ]
-   then
-      help
-      exit 0
-   elif [ $1 = "-w" ]
-   then
-      if [ $2 -gt 0 ] && [ $width = 0 ]
-      then
-         width=$2
-         shift
-      else
-         echo "error: unvalid width entered"
-         exit 1
-      fi
-   elif [[ $1 =~ ".gz" ]]
-   then
-      gz_files=$gz_files" $1"
-   else
-      log_files=$log_files" $1"
-   fi
-   shift
+var_profit()
+{
+	profit=0.00
+	while read -r line; do
+		sell_or_buy=$(echo $line | awk -F";" '{print $3}')
+		amount=$(echo $line | awk -F";" '{print $6}')
+		price=$(echo $line | awk -F";" '{print $4}')
+		value=$(echo "$price * $amount" | bc)
+
+		if [ "$sell_or_buy" = "buy" ]; then
+			profit=$( echo "$profit - $value" | bc )
+		elif [ "$sell_or_buy" = "sell" ]; then
+			profit=$( echo "$profit + $value" | bc )
+		fi
+	done <<< "$1"
+	echo "$profit"
+}
+
+mod_var_profit() #function to calculate the amount of held units
+{
+	profit=0.00
+	while read -r line; do
+		sell_or_buy=$(echo $line | awk -F";" '{print $3}')
+		value=$(echo $line | awk -F";" '{print $6}')
+
+		if [ "$sell_or_buy" = "buy" ]; then
+			profit=$( echo "$profit + $value" | bc )
+		elif [ "$sell_or_buy" = "sell" ]; then
+			profit=$( echo "$profit - $value" | bc )
+		fi
+	done <<< "$1"
+	echo "$profit"
+}
+
+after_date() #returns line inputed after a given date
+{
+	while read -r line; do
+		my_date=$(echo $line | awk -F";" '{print $1}')
+		if [[ "$my_date" > "$2" ]]; then
+			echo "$line"
+		fi	 
+	done <<< "$1"
+}
+
+before_date() #returns line inputed before a given date
+{
+	while read -r line; do
+		my_date=$(echo $line | awk -F";" '{print $1}')
+		if [[ "$my_date" < "$2" ]]; then
+			echo "$line"
+		fi	 
+	done <<< "$1"
+}
+
+ticker_filter() #returns the lines with the correct filter
+{
+	while read -r line; do
+		ticker=$(echo $line | awk -F";" '{print $2}')
+		for i in "${ticker_array[@]}"
+		do
+			if [ "$i" == "$ticker" ] ; then
+				echo "$line"
+			fi
+		done
+	done <<< "$1"
+}
+
+var_last_price()
+{	
+	tmpinput=$(echo "$1" | sort -r)
+	last_price_arr=()
+	arr_price=()
+	while read -r line; do
+		ticker=$(echo $line | awk -F";" '{print $2}')
+		bool_found="false"
+
+		for i in "${last_price_arr[@]}"
+		do
+    		if [ "$i" == "$ticker" ]; then
+        		bool_found="true"
+			fi
+		done
+
+		if [ "$bool_found" = "false" ]; then
+			price=$(echo $line | awk -F";" '{print $4}')
+			arr_price+=("$price")
+			last_price_arr+=("$ticker")
+		fi
+	done  <<< "$tmpinput"
+
+	max=0 
+	for n in "${arr_price[@]}"; do
+		awk 'BEGIN{if ('$n'>'$max') exit 1}'
+		if [ $? -eq 1 ];then
+			max=$n
+		fi
+	done
+
+	longest_num=${#max}
+	for ((i=0; i<${#last_price_arr[@]}; i++)); do
+		ticker="${last_price_arr[i]}"
+		price="${arr_price[i]}"
+    	printf "%-10s: %*.2f\n" $ticker $longest_num $price
+	done | sort
+}
+
+sorting_func()
+{
+	while read -r line; do
+		ticker=$(echo $line | awk -F";" '{print $2}')
+		if [ "$1" == "$ticker" ] ; then
+			echo "$line"
+		fi
+	done <<< "$input_file"
+}
+
+filtered_sorting_func()
+{
+	while read -r line; do
+		ticker=$(echo $line | awk -F";" '{print $2}')
+		if [ "$1" == "$ticker" ] ; then
+			echo "$line"
+		fi
+	done <<< "$filtered_data"
+}
+
+mod_var_last_price()
+{	
+	tmpinput=$(echo "$1" | sort -r)
+	last_price_arr=()
+	arr_price=()
+	while read -r line; do
+		ticker=$(echo $line | awk -F";" '{print $2}')
+		bool_found="false"
+
+		for i in "${last_price_arr[@]}"
+		do
+    		if [ "$i" == "$ticker" ]; then
+        		bool_found="true"
+			fi
+		done
+
+		if [ "$bool_found" = "false" ]; then
+			price=$(echo $line | awk -F";" '{print $4}')
+			arr_price+=("$price")
+			last_price_arr+=("$ticker")
+		fi
+	done  <<< "$tmpinput"
+
+	for ((i=0; i<${#last_price_arr[@]}; i++)); do
+		ticker="${last_price_arr[i]}"
+		price="${arr_price[i]}"
+    	echo "$price"
+	done
+}
+
+pos()
+{
+	tmp_ticks_arr=()
+	arr_pos_nums=()
+	ticks=$(var_list_tick "$1")
+	
+	while read -r line; do
+		tmp_ticks_arr+=("$line")	
+	done <<< "$ticks"
+
+	for i in "${tmp_ticks_arr[@]}"
+	do
+		if [ -z "$filtered_data" ]; then
+			changed_file=$(sorting_func "$i")
+		else
+			changed_file=$(filtered_sorting_func "$i")
+		fi
+		tck_profit=$(mod_var_profit "$changed_file")
+		last_price=$(mod_var_last_price "$changed_file")
+		pos_number=$(echo "$tck_profit * $last_price" | bc)
+		arr_pos_nums+=("$pos_number")
+	done
+
+	max=0
+	for n in "${arr_pos_nums[@]}"; do
+		awk 'BEGIN{if ('${#n}'>'${#max}') exit 1}' #finding the longest number
+		if [ $? -eq 1 ]; then
+			max=$n
+		fi
+	done
+	
+	longest_num=${#max}
+	for ((i=0; i<${#tmp_ticks_arr[@]}; i++)); do
+		ticker="${tmp_ticks_arr[i]}"
+		pos_num="${arr_pos_nums[i]}"
+    	printf "%-10s: %*.2f\n" $ticker $longest_num $pos_num
+	done
+}
+
+ticker_array=()
+file_array=()
+w_array=()
+
+while [ "$#" -gt 0 ]; do #initial while to get the commands and the filters
+	if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+		print_help #calling the help function
+		exit 0
+	fi
+	
+	if [[ "$1" == *".log"* ]]; then #getting the file
+  		given_file="$1"
+		file_array+=("$1")
+	fi
+	
+	if [ "$1" = "list-tick" ] || [ "$1" = "profit" ] || [ "$1" = "pos" ] || [ "$1" = "last-price" ] || [ "$1" = "hist-ord" ] || [ "$1" = "graph-pos" ]; then
+		command="$1"
+	fi
+	if [ "$1" = "-a" ] || [ "$1" = "-b" ] || [ "$1" = "-t" ] || [ "$1" = "-w" ]; then
+		filter="$1"
+		if [ -z "$2" ]; then
+			echo "Invalid argument."
+			exit 1
+		fi
+		after_filter="$2"
+		if [ "$1" = "-t" ];then
+			ticker_array+=("$2")
+		fi
+		if [ "$1" = "-w" ];then
+			w_array+=("$2")
+		fi
+		shift
+	fi
+	shift #moving onto the next argument
 done
 
-#creates ticker filter
-if [ "$ticker_filter" = "" ]
-then
-   ticker_filter="cat"
+if [ ! -t 0 ]; then
+	input_file="$(< /dev/stdin)"
 else
-   ticker_filter="grep -w \"$ticker_filter  \""
+	if [[ "$given_file" == *".gz"* ]] && [ "$filter" = "-t" ] ; then
+		var=$(echo "$(zcat -f "$given_file")")
+		ticker_filter "$var"
+	else
+		for i in "${file_array[@]}"
+		do
+			input_file="${input_file} ${i}"
+		done
+		input_file=$(zcat -f $input_file | sort)
+	fi
 fi
 
-#creates daytime filters
-daytime_after="awk -F ';' -v date=\""$daytime_after"\" '{if(date < \$1){print}}'"
-daytime_before="awk -F ';' -v date=\""$daytime_before"\" '{if(date > \$1){print}}'"
-
-#connects all filters and creates beginning for every command (reads files and filteres them)
-filter="$ticker_filter | $daytime_after | $daytime_before"
-read_files="gzip -q -d -c $gz_files | cat $log_files - | sort"
-command_start="$read_files | $filter"
-
-#makes commands happen
-if [ "$command" = "list-tick" ]
-then
-   eval $command_start | awk -F ';' '{printf $2"\n"}' | sort | uniq
-elif [ "$command" = "profit" ]
-then
-   eval $command_start | awk -F ';' 'BEGIN{ ahoj=0.00 } {$3=="buy" ? ahoj=ahoj-($4*$6) : ahoj=ahoj+($4*$6)} END { printf "%.2f\n", ahoj }'
-elif [ "$command" = "pos" ]
-then
-   eval $command_start | sort -t ';' -k 2,2 -k 1,1 | awk -F ';' -v curTicker="" -v lastPrice=0 -v value=0 '{if($2 != curTicker && curTicker != "")
-   {printf "%s %.2f\n", curTicker, value*lastPrice;value=0};lastPrice=$4;curTicker=$2;$3 == "buy" ? value += $6 : value -= $6} END{printf "%s %.2f\n", curTicker, value*lastPrice}' | sort -t ':' -n -r -k 2,2 | awk -F ' ' -v maxlength=0 '
-   {print;if(length($2)>maxlength){maxlength=length($2)}}END{printf "%d\n",maxlength}' | sort | awk -F ' ' -v maxlength=0 '{if(maxlength==0){maxlength=$1}else{printf "%-10s:%*.2f\n",$1, maxlength + ($2=="" ? 0 : 1), $2}}' | sort -t ':' -n -r -k 2,2
-elif [ "$command" = "last-price" ]
-then
-   eval $command_start | sort -t ';' -k 2,2 -r -k 1,1 | awk -F ';' -v curTicker="" -v lastPrice=0 '{if($2 != curTicker){curTicker = $2;lastPrice = $4;printf "%s %.2f\n", curTicker,lastPrice}}' | awk -F ' ' -v maxlength=0 '
-   {print;if(length($2)>maxlength){maxlength=length($2)}}END{printf "%d\n",maxlength}' | sort | awk -F ' ' -v maxlength=0 '{if(maxlength==0){maxlength=$1}else{printf "%-10s:%*.2f\n",$1, maxlength + ($2=="" ? 0 : 1), $2}}'
-elif [ "$command" = "hist-ord" ]
-then
-   eval $command_start | sort -t ';' -k 2,2 | awk -F ';' -v curTicker="" -v width=0 -v count=0 '{width=0;if($2 != curTicker && curTicker != "")
-   {printf "%s ", curTicker;while(count!=0){width++;count -= 1};printf"%d\n",width};curTicker=$2;count+=1} 
-   END{width=0;printf "%s ", curTicker;while(count!=0){width++;count -= 1};printf"%d\n",width}' | sort -n -r -k 2,2 | awk -F ' ' -v width=$width -v divide=0 -v count=0 '
-   {printf"%-10s: ",$1;if(divide==0&&width!=0){divide=$2/width}else if(divide==0&&width==0){divide=1};count=($2/divide);while(count>0){printf "#";count--;};printf "\n"}' | sort
-elif [ "$command" = "graph-pos" ]
-then
-   eval $command_start | sort -t ';' -k 2,2 -k 1,1 | awk -F ';' -v curTicker="" -v lastPrice=0 -v value=0 '{if($2 != curTicker && curTicker != "")
-   {printf "%s %.2f\n", curTicker, value*lastPrice;value=0};lastPrice=$4;curTicker=$2;$3 == "buy" ? value += $6 : value -= $6} END{printf "%s %.2f\n", curTicker, value*lastPrice}' | sort -t ':' -n -r -k 2,2 | awk -F ' ' -v maxnumber=0 '
-   {print;if($2>maxnumber){maxnumber=$2}else if(-1*$2>maxnumber){maxnumber=-1*$2}}END{printf "%d\n",maxnumber}' | sort | awk -F ' ' -v width=$width -v divide=0 -v maxnumber=0 -v count=0 '{if(maxnumber==0){maxnumber=$1}else{printf"%-10s:",$1;if(divide==0&&width!=0)
-   {divide=maxnumber/width}else if(divide==0&&width==0){divide=1};count=($2/divide);if(count>=1||count<=-1){printf " "};if($2>0){while(count>=1){printf "#";count--;}}else{while(count<=-1){printf "!";count++;}};printf "\n"}}' | sort
+w_length=$(echo "${#w_array[@]}") #checking the length of the array, if it contains more than one element it will result in exiting the program
+if [ $w_length -gt 1 ]; then
+	echo "Too many -w filters given."
+	exit 1
 else
-   eval $command_start
+	width=$(echo "${w_array[0]}") #saving the first element of the array into the variable, will be empty if the array is empty as well
 fi
 
-exit 0
+
+if [[ -z "$filter" ]] && [ -z "$command" ]; then
+	echo "$input_file"
+fi
+
+if [[ ! -z "$filter" ]] && [[ ! -z "$command" ]]; then
+	bool_extra="true" #i have to do extra stuff if there is a command and filter as well
+else
+	bool_extra="false"
+fi
+
+#filters
+if [ "$filter" = "-a" ]; then
+	filtered_data=$(after_date "$input_file" "$after_filter")
+fi
+
+if [ "$filter" = "-b" ]; then
+	filtered_data=$(before_date "$input_file" "$after_filter")
+fi
+
+if [ "$filter" = "-t" ]; then
+	filtered_data=$(ticker_filter "$input_file")
+fi
+
+if [ "$bool_extra" = "false" ] && [[ ! -z "$filtered_data" ]]; then
+	echo "$filtered_data" #if there are filters only, there is no need to move on and just print the saved filtered_data
+	exit 0
+fi	
+
+#EXECUTING COMMANDS
+
+if [ "$command" = "profit" ] && [ "$bool_extra" = "true" ]; then
+	var_profit "$filtered_data" #calling the modified function (filtered_data = filtered data)
+elif [ "$command" = "profit" ] && [ "$bool_extra" = "false" ]; then
+	var_profit "$input_file" #no filters are given, execute the command on the original file
+fi
+
+if [ "$command" = "list-tick" ] && [ "$bool_extra" = "true" ]; then
+	var_list_tick "$filtered_data"
+elif [ "$command" = "list-tick" ] && [ "$bool_extra" = "false" ]; then
+	var_list_tick "$input_file"
+fi
+
+if [ "$command" = "last-price" ] && [ "$bool_extra" = "true" ]; then
+	var_last_price "$filtered_data"
+elif [ "$command" = "last-price" ] && [ "$bool_extra" = "false" ]; then
+	var_last_price "$input_file"
+fi
+
+if [ "$command" = "pos" ] && [ "$bool_extra" = "true" ]; then
+	pos "$filtered_data" | sort -t: -k 2nr
+elif [ "$command" = "pos" ] && [ "$bool_extra" = "false" ]; then
+	pos "$input_file" | sort -t: -k 2nr
+fi
+
