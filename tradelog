@@ -1,0 +1,135 @@
+#!/bin/sh
+
+export POSIXLY_CORRECT=yes
+export LC_NUMERIC=en_US.UTF-8
+
+#prints help
+help()
+{
+echo ""
+echo "USAGE"
+echo "tradelog [-h|--help] [FILTR] [PŘÍKAZ] [LOG [LOG2 [...]]"
+echo ""
+echo "COMMANDS"
+echo "list-tick – prints list of tickers"
+echo "profit – prints profit from all holded positions"
+echo "pos – prints value of currently holded positions"
+echo "last-price – last known price for every ticker"
+echo "hist-ord – prints histogram of number of transactions for every ticker"
+echo "graph-pos – prints graph of values of currently holded positions"
+echo ""
+echo "FILTERS"
+echo "-a DATETIME – after: logs after this date only"
+echo "-b DATETIME – before: logs before this date only"
+echo "-t TICKER – logs only with this ticker"
+echo "-w WIDTH – width of printed graph (optional)"
+echo "-h | --help – prints this"
+echo ""
+}
+
+#variables inicialization
+command=""
+ticker_filter=""
+log_files=""
+gz_files=""
+daytime_after="0000-00-00 00:00:00"
+daytime_before="9999-99-99 99:99:99"
+width=0
+
+if [ "$#" = "0" ]
+then
+   cat -
+   exit 0
+fi
+
+#reads command line arguments
+while [ "$#" -gt 0 ]
+do
+   if [ $1 = "-t" ]
+   then
+      ticker_filter="$ticker_filter$2\|"
+      shift
+   elif [ $1 = "-a" ]
+   then
+      daytime_after="$2"
+      shift
+   elif [ $1 = "-b" ]
+   then
+      daytime_before="$2"
+      shift
+   elif [ $1 = "list-tick" ] || [ $1 = "profit" ] || [ $1 = "pos" ] || [ $1 = "last-price" ] || [ $1 = "hist-ord" ] || [ $1 = "graph-pos" ]
+   then
+      command="$1"
+   elif [ $1 = "-h" ] || [ $1 = "--help" ]
+   then
+      help
+      exit 0
+   elif [ $1 = "-w" ]
+   then
+      if [ $2 -gt 0 ] && [ $width = 0 ]
+      then
+         width=$2
+         shift
+      else
+         echo "error: unvalid width entered"
+         exit 1
+      fi
+   else
+      case "$1" in
+         *gz*) gz_files=$gz_files" $1" ;;
+         *) log_files=$log_files" $1" ;;
+      esac
+   fi
+   shift
+done
+
+#creates ticker filter
+if [ "$ticker_filter" = "" ]
+then
+   ticker_filter="cat"
+else
+   ticker_filter="grep -w \"$ticker_filter  \""
+fi
+
+#creates daytime filters
+daytime_after="awk -F ';' -v date=\""$daytime_after"\" '{if(date < \$1){print}}'"
+daytime_before="awk -F ';' -v date=\""$daytime_before"\" '{if(date > \$1){print}}'"
+
+#connects all filters and creates beginning for every command (reads files and filteres them)
+filter="$ticker_filter | $daytime_after | $daytime_before"
+read_files="gzip -q -d -c $gz_files | cat $log_files - | sort"
+command_start="$read_files | $filter"
+
+#makes commands happen
+if [ "$command" = "list-tick" ]
+then
+   eval $command_start | awk -F ';' '{printf $2"\n"}' | sort | uniq
+elif [ "$command" = "profit" ]
+then
+   eval $command_start | awk -F ';' 'BEGIN{ ahoj=0.00 } {$3=="buy" ? ahoj=ahoj-($4*$6) : ahoj=ahoj+($4*$6)} END { printf "%.2f\n", ahoj }'
+elif [ "$command" = "pos" ]
+then
+   eval $command_start | sort -t ';' -k 2,2 -k 1,1 | awk -F ';' -v curTicker="" -v lastPrice=0 -v value=0 '{if($2 != curTicker && curTicker != "")
+   {printf "%s %.2f\n", curTicker, value*lastPrice;value=0};lastPrice=$4;curTicker=$2;$3 == "buy" ? value += $6 : value -= $6} END{printf "%s %.2f\n", curTicker, value*lastPrice}' | sort -t ':' -n -r -k 2,2 | awk -F ' ' -v maxlength=0 '
+   {print;if(length($2)>maxlength){maxlength=length($2)}}END{printf "%d\n",maxlength}' | sort | awk -F ' ' -v maxlength=0 '{if(maxlength==0){maxlength=$1}else{printf "%-10s:%*.2f\n",$1, maxlength + ($2=="" ? 0 : 1), $2}}' | sort -t ':' -n -r -k 2,2
+elif [ "$command" = "last-price" ]
+then
+   eval $command_start | sort -t ';' -k 2,2 -r -k 1,1 | awk -F ';' -v curTicker="" -v lastPrice=0 '{if($2 != curTicker){curTicker = $2;lastPrice = $4;printf "%s %.2f\n", curTicker,lastPrice}}' | awk -F ' ' -v maxlength=0 '
+   {print;if(length($2)>maxlength){maxlength=length($2)}}END{printf "%d\n",maxlength}' | sort | awk -F ' ' -v maxlength=0 '{if(maxlength==0){maxlength=$1}else{printf "%-10s:%*.2f\n",$1, maxlength + ($2=="" ? 0 : 1), $2}}'
+elif [ "$command" = "hist-ord" ]
+then
+   eval $command_start | sort -t ';' -k 2,2 | awk -F ';' -v curTicker="" -v width=0 -v count=0 '{width=0;if($2 != curTicker && curTicker != "")
+   {printf "%s ", curTicker;while(count!=0){width++;count -= 1};printf"%d\n",width};curTicker=$2;count+=1} 
+   END{width=0;printf "%s ", curTicker;while(count!=0){width++;count -= 1};printf"%d\n",width}' | sort -n -r -k 2,2 | awk -F ' ' -v width=$width -v divide=0 -v count=0 '
+   {printf"%-10s: ",$1;if(divide==0&&width!=0){divide=$2/width}else if(divide==0&&width==0){divide=1};count=($2/divide);while(count>0){printf "#";count--;};printf "\n"}' | sort
+elif [ "$command" = "graph-pos" ]
+then
+   eval $command_start | sort -t ';' -k 2,2 -k 1,1 | awk -F ';' -v curTicker="" -v lastPrice=0 -v value=0 '{if($2 != curTicker && curTicker != "")
+   {printf "%s %.2f\n", curTicker, value*lastPrice;value=0};lastPrice=$4;curTicker=$2;$3 == "buy" ? value += $6 : value -= $6} END{printf "%s %.2f\n", curTicker, value*lastPrice}' | sort -t ':' -n -r -k 2,2 | awk -F ' ' -v maxnumber=0 '
+   {print;if($2>maxnumber){maxnumber=$2}else if(-1*$2>maxnumber){maxnumber=-1*$2}}END{printf "%d\n",maxnumber}' | sort | awk -F ' ' -v width=$width -v divide=0 -v maxnumber=0 -v count=0 '{if(maxnumber==0){maxnumber=$1}else{printf"%-10s:",$1;if(divide==0&&width!=0)
+   {divide=maxnumber/width}else if(divide==0&&width==0){divide=1};count=($2/divide);if(count>=1||count<=-1){printf " "};if($2>0){while(count>=1){printf "#";count--;}}else{while(count<=-1){printf "!";count++;}};printf "\n"}}' | sort
+else
+   eval $command_start
+fi
+
+exit 0
