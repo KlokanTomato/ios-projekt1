@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 export POSIXLY_CORRECT=yes
 export LC_NUMERIC=en_US.UTF-8
@@ -74,11 +74,11 @@ do
          echo "error: unvalid width entered"
          exit 1
       fi
+   elif [[ $1 =~ ".gz" ]]
+   then
+      gz_files=$gz_files" $1"
    else
-      case "$1" in
-         *gz*) gz_files=$gz_files" $1" ;;
-         *) log_files=$log_files" $1" ;;
-      esac
+      log_files=$log_files" $1"
    fi
    shift
 done
