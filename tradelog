@@ -3,247 +3,133 @@
 export POSIXLY_CORRECT=yes
 export LC_NUMERIC=en_US.UTF-8
 
-print_help()
+#prints help
+help()
 {
-    echo "**Tradelog**"
-    echo ""
-    echo "Usage:"
-    echo "  tradelog [-h|--help] [FILTER] [COMMAND] [LOG [LOG2 [...]]"
-    echo ""
-    echo "Commands: (one per run)"
-    echo "  list-tick"
-    echo "          summary of the all tickers occured in the logs"
-    echo "  profit"
-    echo "          printage of the total income form the closed positions"
-    echo "  pos"
-    echo "          prints values of the currently held positions in descending order"
-    echo "  last-price"
-    echo "          prints the last known price for each ticker"
-    echo "  hist-ord"
-    echo "          print the histogram of count of the all transactions for each of the tickers"
-    echo "          standard output is one # per transaction, can be modified using -w"
-    echo "  graph-pos"
-    echo "          print the graph of values of the held positions for each held ticker"
-    echo "          standard output is 1000 USD per symbol, can be modified by using -w"
-    echo "          # === gain, ! === loss"
-    echo ""
-    echo "Filters: (combination of)"
-    echo "  -a DATETIME"
-    echo "          after: prints only the records after the date given in DATETIME,"
-    echo "          records of the DATETIME are not considered"
-    echo "          the format of the DATETIME is: YYYY-MM-DD HH:MM:SS"
-    echo "  -b DATETIME"
-    echo "          before: prints only the records before the date given in DATETIME,"
-    echo "          records of the DATETIME are not considered"
-    echo "          the format of the DATETIME is: YYYY-MM-DD HH:MM:SS"
-    echo "  -t TICKER"
-    echo "          only the records of the given TICKER are considered"
-    echo "          if more occurences of the -t filter are found, tradelog"
-    echo "          will display all records of given tickers"
-    echo "  -w WIDTH"
-    echo "          sets the count for the most symbols on one row"
-    echo "          multiple occurences of -w are considered as a mistake"
-    echo "Unlisted:"
-    echo "  -h | --help:"
-    echo "          Prints help for the usage of the script"
-    echo ""
-
-    return 0
+echo ""
+echo "USAGE"
+echo "tradelog [-h|--help] [FILTR] [PŘÍKAZ] [LOG [LOG2 [...]]"
+echo ""
+echo "COMMANDS"
+echo "list-tick – prints list of tickers"
+echo "profit – prints profit from all holded positions"
+echo "pos – prints value of currently holded positions"
+echo "last-price – last known price for every ticker"
+echo "hist-ord – prints histogram of number of transactions for every ticker"
+echo "graph-pos – prints graph of values of currently holded positions"
+echo ""
+echo "FILTERS"
+echo "-a DATETIME – after: logs after this date only"
+echo "-b DATETIME – before: logs before this date only"
+echo "-t TICKER – logs only with this ticker"
+echo "-w WIDTH – width of printed graph (optional)"
+echo "-h | --help – prints this"
+echo ""
 }
 
-list_tick_fc()
-{
-    awk -F";" '{if ( a[$2] != "" ) {a[$2] = $2}} END {for (i in a) {printf("%s\n", i)}}'
-}
+#variables inicialization
+command=""
+ticker_filter=""
+log_files=""
+gz_files=""
+daytime_after="0000-00-00 00:00:00"
+daytime_before="9999-99-99 99:99:99"
+width=0
 
-profit_fc()
-{
-    awk -F";" '{if ($3 == "sell") {profit += $4 * $6} else if ($3 == "buy") {profit -= $4 * $6}} END {printf("%.2f\n",profit)}'
-}
-
-pos_fc()
-{
-    awk -F";" '{last_price[$2]=$4; if ($3 == "buy") {count[$2]+=$6} else if ($3 == "sell") {count[$2]-=$6}}
-    END {for (key in count) {if (count[key] != "0") {value[key]=last_price[key] * count[key]}}
-    for (key2 in value) {value[key2] = sprintf("%.2f",value[key2]); if (maxLength < length(value[key2])) {maxLength = length(value[key2])}}
-    for (key3 in value) {printf("%-10s: %*s\n", key3, maxLength, value[key3])}}'
-}
-
-last_price_fc()
-{
-    awk -F";" '{last_price[$2] = sprintf("%.2f", $4); if (length(last_price[$2]) > maxlength) {maxlength=length(last_price[$2])}}
-    END {for (key in last_price) {printf("%-10s: %*s\n", key, maxlength, last_price[key])}}'
-}
-
-graph_pos_fc() #with optional parameter WIDTH
-{
-    awk -F";" -v WIDTH=$1 'function abs(v) {return v < 0 ? -v : v}
-    {last_price[$2]=$4; if ($3 == "buy") {count[$2]+=$6} else if ($3 == "sell") {count[$2]-=$6}}
-    END {for (key in count) {if (count[key] != "0") {value[key]=last_price[key] * count[key]}}
-    for (key2 in value) {if (abs(value[key2]) > maxAbs) {maxAbs=abs(value[key2])}} 
-    if (WIDTH == "") {oneStep = 1000} else {oneStep = maxAbs / WIDTH};
-    for (key3 in value) {if (value[key3] < 0) {symbol = "!"} else {symbol = "#"}
-    repete = abs(value[key3]) / oneStep; sub(/\..*/, "", repete);
-    printf("%-10s: ", key3); for (i=0; i != repete ;i++) {printf("%s",symbol)} printf("\n")}}'
-}
-
-hist_ord_fc() #with optional parameter WIDTH
-{
-    if [ "$1" = "" ]; then
-        awk -F";" '{histo[$2] = histo[$2] "#"}
-        END {for (key in histo) {printf("%-10s: %s\n", key, histo[key])}}'
-    else
-        awk -F";" -v width=$1 '{histo[$2]++;} 
-        END {for (key in histo) {if (histo[key] > max) {max = histo[key]}}
-        oneSymbol = max / width;
-        for (key2 in histo) {count = histo[key2]/oneSymbol; sub(/\..*/, "", count);
-        printf("%-10s: ", key2); for (i=0; i != count; i++) {printf("#")} printf("\n")}}'
-    fi
-}
-
-TICKERS=";"  #means, that every ticker should be processed
-COMMAND=""
-ATIME="0000-00-00 00:00:00"
-BTIME="9999-99-99 99:99:99"
-WIDTH=""
-LOGS=""
-
-if [ $# -eq 0 ]; then
-    awk '{print $0}'
-    exit 0
+if [ "$#" = "0" ]
+then
+   cat -
+   exit 0
 fi
 
-for (( a=1; a <= $#; a++ ))
+#reads command line arguments
+while [ "$#" -gt 0 ]
 do
-    eval b=\${$a}
-    case $b in
-        list-tick|profit|pos|last-price|hist-ord|graph-pos)
-            if [ "$COMMAND" != "" ]
-            then
-                echo "$b: Multiple commands are not supported during one run of the script"
-                exit 1
-            else
-                COMMAND=$b
-            fi
-            ;;
-        -a)
-            if [ "$ATIME" != "0000-00-00 00:00:00" ]
-            then
-                echo "-a DATEIME: -a can be called only once per run"
-                exit 1
-            else
-                (( a++ ))
-                eval ATIME=\${$a}
-                if [[ !($ATIME =~ [0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2}) ]]; then
-                    echo "-a DATETIME: Invalid date format, use a format of YYYY-MM-DD HH:MM:SS"
-                    exit 1
-                fi
-            fi
-            ;;
-        -b)
-            if [ "$BTIME" != "9999-99-99 99:99:99" ]
-            then
-                echo "-b DATETIME: -b can be called only once per run"
-                exit 1
-            else
-                (( a++ ))
-                eval BTIME=\${$a}
-                if [[ !($BTIME =~ [0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2}) ]]; then
-                    echo "-b DATETIME: Invalid date format, use a format of YYYY-MM-DD HH:MM:SS"
-                    exit 1
-                fi
-            fi
-            ;;
-        -t)
-            (( a++ ))
-            eval TICKERS="\$TICKERS\${$a}\;"
-            ;;
-        -w)
-            if [ "$WIDTH" != "" ]; then
-                echo "-w WIDTH: -w can't be called more than once"
-                exit 1
-            fi
-            (( a++ ))
-            eval WIDTH=\${$a}
-            if [[ !($WIDTH =~ ^[0-9]+$) ]]; then
-                echo "-w WIDTH: argument must be unsigned whole number"
-                exit 1
-            fi
-            ;;
-        -h|--help)
-            print_help
-            exit 0
-            ;;
-        
-        *.log)  
-            LOGS="$LOGS$b"
-            if [ $a -ne $# ]; then
-                LOGS="$LOGS "
-            fi
-            ;;
-
-        *.gz)
-            GZIP="$GZIP$b"
-            if [ $a -ne $# ]; then
-                GZIP="$GZIP "
-            fi
-            ;;
-        *)
-            echo "$b: Unknown structure"
-            exit 1
-    esac                  
+   if [ $1 = "-t" ]
+   then
+      ticker_filter="$ticker_filter$2\|"
+      shift
+   elif [ $1 = "-a" ]
+   then
+      daytime_after="$2"
+      shift
+   elif [ $1 = "-b" ]
+   then
+      daytime_before="$2"
+      shift
+   elif [ $1 = "list-tick" ] || [ $1 = "profit" ] || [ $1 = "pos" ] || [ $1 = "last-price" ] || [ $1 = "hist-ord" ] || [ $1 = "graph-pos" ]
+   then
+      command="$1"
+   elif [ $1 = "-h" ] || [ $1 = "--help" ]
+   then
+      help
+      exit 0
+   elif [ $1 = "-w" ]
+   then
+      if [ $2 -gt 0 ] && [ $width = 0 ]
+      then
+         width=$2
+         shift
+      else
+         echo "error: unvalid width entered"
+         exit 1
+      fi
+   elif [[ $1 =~ ".gz" ]]
+   then
+      gz_files=$gz_files" $1"
+   else
+      log_files=$log_files" $1"
+   fi
+   shift
 done
 
-if [[ $GZIP == "" ]] && [[ $LOGS != "" ]]; then
-    READ_INPUT="cat $LOGS | sort"
-elif [[ $GZIP != "" ]] && [[ $LOGS == "" ]]; then
-    READ_INPUT="gzip -d -c $GZIP | cat - | sort"
-elif [[ $GZIP != "" ]] && [[ $LOGS != "" ]]; then
-    READ_INPUT="gzip -d -c $GZIP | cat $LOGS - | sort"
+#creates ticker filter
+if [ "$ticker_filter" = "" ]
+then
+   ticker_filter="cat"
 else
-    READ_INPUT="cat - | sort"
+   ticker_filter="grep -w \"$ticker_filter  \""
 fi
 
+#creates daytime filters
+daytime_after="awk -F ';' -v date=\""$daytime_after"\" '{if(date < \$1){print}}'"
+daytime_before="awk -F ';' -v date=\""$daytime_before"\" '{if(date > \$1){print}}'"
 
-#-a filter
-AFILTER="awk -F\";\" -v timeA=\"$ATIME\" 'timeA < \$1 {print \$0}'"
-#-b filter
-BFILTER="awk -F\";\" -v timeB=\"$BTIME\" 'timeB > \$1 {print \$0}'"
+#connects all filters and creates beginning for every command (reads files and filteres them)
+filter="$ticker_filter | $daytime_after | $daytime_before"
+read_files="gzip -q -d -c $gz_files | cat $log_files - | sort"
+command_start="$read_files | $filter"
 
-TFILTER="awk -F\";\" -v TICKERS=\"$TICKERS\" '{\
-    var = sprintf(\";%s;\", \$2);
-    if (TICKERS == \";\") {
-        print \$0}
-    else if (TICKERS ~ var){
-        print \$0}}'"
-
-case $COMMAND in
-    list-tick)
-        eval $READ_INPUT | eval $AFILTER | eval $BFILTER | eval $TFILTER | list_tick_fc | sort
-        ;;
-    profit)
-        eval $READ_INPUT | eval $AFILTER | eval $BFILTER | eval $TFILTER | profit_fc
-        ;;
-    pos)
-        eval $READ_INPUT | eval $AFILTER | eval $BFILTER | eval $TFILTER | pos_fc | sort -nr -t ':' -k2
-        ;;
-    last-price)
-        eval $READ_INPUT | eval $AFILTER | eval $BFILTER | eval $TFILTER | last_price_fc | sort
-        ;;
-    hist-ord)
-        eval $READ_INPUT | eval $AFILTER | eval $BFILTER | eval $TFILTER | hist_ord_fc "$WIDTH" | sort
-        ;;
-    graph-pos)
-        eval $READ_INPUT | eval $AFILTER | eval $BFILTER | eval $TFILTER | graph_pos_fc "$WIDTH" | sort
-        ;;
-
-    "")
-        eval $READ_INPUT | eval $AFILTER | eval $BFILTER | eval $TFILTER
-        ;;
-    *)
-        echo "An unexpected error occured during a chosing of a process"
-        exit 1
-        ;;
-esac
+#makes commands happen
+if [ "$command" = "list-tick" ]
+then
+   eval $command_start | awk -F ';' '{printf $2"\n"}' | sort | uniq
+elif [ "$command" = "profit" ]
+then
+   eval $command_start | awk -F ';' 'BEGIN{ ahoj=0.00 } {$3=="buy" ? ahoj=ahoj-($4*$6) : ahoj=ahoj+($4*$6)} END { printf "%.2f\n", ahoj }'
+elif [ "$command" = "pos" ]
+then
+   eval $command_start | sort -t ';' -k 2,2 -k 1,1 | awk -F ';' -v curTicker="" -v lastPrice=0 -v value=0 '{if($2 != curTicker && curTicker != "")
+   {printf "%s %.2f\n", curTicker, value*lastPrice;value=0};lastPrice=$4;curTicker=$2;$3 == "buy" ? value += $6 : value -= $6} END{printf "%s %.2f\n", curTicker, value*lastPrice}' | sort -t ':' -n -r -k 2,2 | awk -F ' ' -v maxlength=0 '
+   {print;if(length($2)>maxlength){maxlength=length($2)}}END{printf "%d\n",maxlength}' | sort | awk -F ' ' -v maxlength=0 '{if(maxlength==0){maxlength=$1}else{printf "%-10s:%*.2f\n",$1, maxlength + ($2=="" ? 0 : 1), $2}}' | sort -t ':' -n -r -k 2,2
+elif [ "$command" = "last-price" ]
+then
+   eval $command_start | sort -t ';' -k 2,2 -r -k 1,1 | awk -F ';' -v curTicker="" -v lastPrice=0 '{if($2 != curTicker){curTicker = $2;lastPrice = $4;printf "%s %.2f\n", curTicker,lastPrice}}' | awk -F ' ' -v maxlength=0 '
+   {print;if(length($2)>maxlength){maxlength=length($2)}}END{printf "%d\n",maxlength}' | sort | awk -F ' ' -v maxlength=0 '{if(maxlength==0){maxlength=$1}else{printf "%-10s:%*.2f\n",$1, maxlength + ($2=="" ? 0 : 1), $2}}'
+elif [ "$command" = "hist-ord" ]
+then
+   eval $command_start | sort -t ';' -k 2,2 | awk -F ';' -v curTicker="" -v width=0 -v count=0 '{width=0;if($2 != curTicker && curTicker != "")
+   {printf "%s ", curTicker;while(count!=0){width++;count -= 1};printf"%d\n",width};curTicker=$2;count+=1} 
+   END{width=0;printf "%s ", curTicker;while(count!=0){width++;count -= 1};printf"%d\n",width}' | sort -n -r -k 2,2 | awk -F ' ' -v width=$width -v divide=0 -v count=0 '
+   {printf"%-10s: ",$1;if(divide==0&&width!=0){divide=$2/width}else if(divide==0&&width==0){divide=1};count=($2/divide);while(count>0){printf "#";count--;};printf "\n"}' | sort
+elif [ "$command" = "graph-pos" ]
+then
+   eval $command_start | sort -t ';' -k 2,2 -k 1,1 | awk -F ';' -v curTicker="" -v lastPrice=0 -v value=0 '{if($2 != curTicker && curTicker != "")
+   {printf "%s %.2f\n", curTicker, value*lastPrice;value=0};lastPrice=$4;curTicker=$2;$3 == "buy" ? value += $6 : value -= $6} END{printf "%s %.2f\n", curTicker, value*lastPrice}' | sort -t ':' -n -r -k 2,2 | awk -F ' ' -v maxnumber=0 '
+   {print;if($2>maxnumber){maxnumber=$2}else if(-1*$2>maxnumber){maxnumber=-1*$2}}END{printf "%d\n",maxnumber}' | sort | awk -F ' ' -v width=$width -v divide=0 -v maxnumber=0 -v count=0 '{if(maxnumber==0){maxnumber=$1}else{printf"%-10s:",$1;if(divide==0&&width!=0)
+   {divide=maxnumber/width}else if(divide==0&&width==0){divide=1};count=($2/divide);if(count>=1||count<=-1){printf " "};if($2>0){while(count>=1){printf "#";count--;}}else{while(count<=-1){printf "!";count++;}};printf "\n"}}' | sort
+else
+   eval $command_start
+fi
 
 exit 0
