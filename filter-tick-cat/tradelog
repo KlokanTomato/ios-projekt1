@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 export POSIXLY_CORRECT=yes
 export LC_NUMERIC=en_US.UTF-8
@@ -74,11 +74,11 @@ do
          echo "error: unvalid width entered"
          exit 1
       fi
+   elif [[ $1 =~ ".gz" ]]
+   then
+      gz_files=$gz_files" $1"
    else
-      case "$1" in
-         *gz*) gz_files=$gz_files" $1" ;;
-         *) log_files=$log_files" $1" ;;
-      esac
+      log_files=$log_files" $1"
    fi
    shift
 done
@@ -97,7 +97,11 @@ daytime_before="awk -F ';' -v date=\""$daytime_before"\" '{if(date > \$1){print}
 
 #connects all filters and creates beginning for every command (reads files and filteres them)
 filter="$ticker_filter | $daytime_after | $daytime_before"
-read_files="gzip -q -d -c $gz_files | cat $log_files - | sort"
+read_files="cat $log_files - | sort"
+if [["$gz_files" != ""]]
+then
+   read_files="gzip -q -d -c $gz_files | "$read_files
+fi
 command_start="$read_files | $filter"
 
 #makes commands happen
